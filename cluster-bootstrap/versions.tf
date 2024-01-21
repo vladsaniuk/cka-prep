@@ -1,7 +1,7 @@
 terraform {
   backend "s3" {
     bucket         = "vlad-sanyuk-tfstate-bucket-dev"
-    key            = "cka/terraform.tfstate"
+    key            = "cka/cluster-bootstrap/terraform.tfstate"
     encrypt        = true
     dynamodb_table = "state_lock"
     region         = "us-east-1"

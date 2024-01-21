@@ -11,8 +11,7 @@ resource "aws_subnet" "public_subnets" {
   availability_zone = each.key
   cidr_block        = each.value
   vpc_id            = aws_vpc.vpc.id
-  #   tags              = tomap(merge({ Name = "Public-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/elb" = "1" }, var.tags))
-  tags = tomap(merge({ Name = "Public-subnet-${each.key}-${var.env}-env" }, var.tags))
+  tags              = tomap(merge({ Name = "Public-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/elb" = "1", "kubernetes.io/cluster/${var.cluster_name}" = "shared" }, var.tags))
 }
 
 resource "aws_subnet" "private_subnets" {
@@ -20,8 +19,7 @@ resource "aws_subnet" "private_subnets" {
   availability_zone = each.key
   cidr_block        = each.value
   vpc_id            = aws_vpc.vpc.id
-  #   tags              = tomap(merge({ Name = "Private-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/internal-elb" = "1" }, { "kubernetes.io/cluster/${var.cluster_name}" = "shared" }, { "karpenter.sh/discovery" = "${var.cluster_name}" }, var.tags))
-  tags = tomap(merge({ Name = "Private-subnet-${each.key}-${var.env}-env" }, var.tags))
+  tags              = tomap(merge({ Name = "Private-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/internal-elb" = "1" }, { "kubernetes.io/cluster/${var.cluster_name}" = "shared" }, { "karpenter.sh/discovery" = "${var.cluster_name}" }, var.tags))
 }
 
 # Export subnets IDs as array to reference it going forward
@@ -287,11 +285,16 @@ resource "null_resource" "control_plane_init" {
     host        = aws_instance.control_plane.public_ip
   }
 
+  provisioner "file" {
+    source      = "kubeadm_config.yaml"
+    destination = "/tmp/kubeadm_config.yaml"
+  }
+
   provisioner "remote-exec" {
     script = "${path.module}/control_plane.sh"
   }
 
-  # grab kubeadm join command for nodes
+  # grab kubeadm join command for nodes and kubeconfig for k8s provider
   provisioner "local-exec" {
     command = "ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" > ${path.module}/node_join.sh"
   }
@@ -348,10 +351,40 @@ resource "null_resource" "node_join" {
   ]
 }
 
+resource "null_resource" "get_kubeconfig" {
+  # trigger changes if kubeconfig changes, or doesn't exist
+  triggers = {
+    kubeconfig = aws_instance.control_plane.public_ip
+  }
+
+  connection {
+    type        = "ssh"
+    user        = "ubuntu"
+    private_key = file("~/.ssh/id_rsa")
+    host        = aws_instance.control_plane.public_ip
+  }
+
+  # copy kubeconfig file from remote to local
+  provisioner "local-exec" {
+    command = <<-EOF
+      ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/admin.conf" > ${path.module}/kubeconfig
+      ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/sa.pub" > ${path.module}/sa-signer.key.pub
+    EOF
+  }
+
+  depends_on = [
+    null_resource.control_plane_init
+  ]
+}
+
 output "control_plane_ips" {
   value = aws_instance.control_plane.public_ip
 }
 
 output "node_ips" {
   value = aws_instance.node[*].public_ip
+}
+
+output "cluster_name" {
+  value = var.cluster_name
 }

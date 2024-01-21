@@ -5,7 +5,7 @@ cluster_init_status=$?
 if [[ $cluster_init_status == 1 ]]
 then
     # init control plane
-    sudo kubeadm init
+    sudo kubeadm init --config /tmp/kubeadm_config.yaml
     mkdir -p /home/ubuntu/.kube
     sudo cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
     sudo chown "$(id -u)":"$(id -g)" /home/ubuntu/.kube/config
