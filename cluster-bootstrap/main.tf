@@ -137,7 +137,8 @@ resource "aws_security_group" "control_plane" {
     from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    # k8s API server are available from internal network and my IP
+    cidr_blocks = [aws_vpc.vpc.cidr_block, var.my_ip]
   }
 
   ingress {
@@ -187,6 +188,14 @@ resource "aws_security_group" "control_plane" {
     protocol    = "udp"
     cidr_blocks = [aws_vpc.vpc.cidr_block]
   }
+
+  # ingress {
+  #   description = "Nginx Ingress Controller - ValidatingWebhookConfiguration"
+  #   from_port   = 8443
+  #   to_port     = 8443
+  #   protocol    = "tcp"
+  #   cidr_blocks = [aws_vpc.vpc.cidr_block]
+  # }
 
   egress {
     from_port        = 0
@@ -267,6 +276,23 @@ resource "aws_instance" "control_plane" {
   tags                        = tomap(merge({ Name = "control-plane-${var.env}" }, var.tags))
 }
 
+# Generate config for kubeadm, so API server will be reachable from my IP and add config for IRSA
+resource "local_file" "kubeadm_config" {
+  filename        = "${path.module}/kubeadm_config.yaml"
+  file_permission = "0755"
+
+  content = <<-EOF
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+apiServer:
+  certSANs:
+  - ${aws_instance.control_plane.public_ip}
+  - ${aws_instance.control_plane.private_ip}
+  extraArgs:
+    api-audiences: "irsa"
+  EOF
+}
+
 resource "null_resource" "control_plane_init" {
   # trigger changes if control plance EC2 change
   triggers = {
@@ -286,7 +312,7 @@ resource "null_resource" "control_plane_init" {
   }
 
   provisioner "file" {
-    source      = "kubeadm_config.yaml"
+    source      = "${path.module}/kubeadm_config.yaml"
     destination = "/tmp/kubeadm_config.yaml"
   }
 
@@ -368,6 +394,7 @@ resource "null_resource" "get_kubeconfig" {
   provisioner "local-exec" {
     command = <<-EOF
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/admin.conf" > ${path.module}/kubeconfig
+      KUBECONFIG=kubeconfig kubectl config set clusters.kubernetes.server https://${aws_instance.control_plane.public_ip}:6443
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/sa.pub" > ${path.module}/sa-signer.key.pub
     EOF
   }
@@ -387,4 +414,16 @@ output "node_ips" {
 
 output "cluster_name" {
   value = var.cluster_name
+}
+
+output "vpc_id" {
+  value = aws_vpc.vpc.id
+}
+
+output "public_subnets_ids" {
+  value = local.public_subnets_ids
+}
+
+output "worker_nodes_ids" {
+  value = aws_instance.node[*].id
 }

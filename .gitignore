@@ -1,5 +1,6 @@
 **/.terraform
 **/.terraform.lock.hcl
+**/*.tfplan
 **/node_join.sh
 **/kubeconfig
 **/sa-signer.key.pub

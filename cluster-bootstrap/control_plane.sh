@@ -4,11 +4,13 @@ kubectl cluster-info
 cluster_init_status=$?
 if [[ $cluster_init_status == 1 ]]
 then
+    set -e
     # init control plane
     sudo kubeadm init --config /tmp/kubeadm_config.yaml
     mkdir -p /home/ubuntu/.kube
     sudo cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
     sudo chown "$(id -u)":"$(id -g)" /home/ubuntu/.kube/config
+    set +e
 else
     echo "Cluster already initialized, skip init step"
 fi

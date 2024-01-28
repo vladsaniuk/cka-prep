@@ -46,4 +46,5 @@ variable "nodes_count" {
 
 variable "cluster_name" {
   description = "Cluster name, that will be used for AWS LBC and Karpenter"
+  default     = "k8s-cluster"
 }
