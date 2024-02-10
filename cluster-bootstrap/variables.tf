@@ -41,10 +41,18 @@ variable "my_ip" {
 
 variable "nodes_count" {
   description = "Count of nodes to be spawned"
+  type        = number
   default     = 2
 }
 
 variable "cluster_name" {
   description = "Cluster name, that will be used for AWS LBC and Karpenter"
+  type        = string
   default     = "k8s-cluster"
+}
+
+variable "audiences" {
+  description = "Audiences to use for IRSA"
+  type        = string
+  default     = "irsa"
 }

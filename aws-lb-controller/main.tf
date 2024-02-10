@@ -39,11 +39,11 @@ resource "aws_iam_role" "aws_load_balancer_controller_role" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Effect = "Allow"
         Principal = {
-          "Federated" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:${data.terraform_remote_state.oidc.outputs.oidc_issuer}"
+          "Federated" : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.terraform_remote_state.oidc.outputs.oidc_issuer}"
         }
         Condition = {
           "StringEquals" : {
-            "${data.terraform_remote_state.oidc.outputs.oidc_issuer}:aud" : "irsa",
+            "${data.terraform_remote_state.oidc.outputs.oidc_issuer}:aud" : var.audiences,
             "${data.terraform_remote_state.oidc.outputs.oidc_issuer}:sub" : "system:serviceaccount:${local.namespace_name}:${local.sa_name}"
           }
         }

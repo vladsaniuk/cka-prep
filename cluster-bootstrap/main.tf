@@ -1,3 +1,10 @@
+locals {
+  bucket_name     = "oidc-provider"
+  issuer_hostpath = "s3.${data.aws_region.current.name}.amazonaws.com/${local.bucket_name}"
+}
+
+data "aws_region" "current" {}
+
 # tomap & merge to add kv to map
 resource "aws_vpc" "vpc" {
   cidr_block         = "10.0.0.0/16"
@@ -289,7 +296,8 @@ apiServer:
   - ${aws_instance.control_plane.public_ip}
   - ${aws_instance.control_plane.private_ip}
   extraArgs:
-    api-audiences: "irsa"
+    api-audiences: ${var.audiences}
+    service-account-issuer: https://${local.issuer_hostpath}
   EOF
 }
 
@@ -396,6 +404,7 @@ resource "null_resource" "get_kubeconfig" {
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/admin.conf" > ${path.module}/kubeconfig
       KUBECONFIG=kubeconfig kubectl config set clusters.kubernetes.server https://${aws_instance.control_plane.public_ip}:6443
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/sa.pub" > ${path.module}/sa-signer.key.pub
+      chmod 400 sa-signer.key.pub
     EOF
   }
 

@@ -1,19 +1,46 @@
 locals {
-  issuer_hostpath = "s3.${data.aws_region.current.name}.amazonaws.com/${aws_s3_bucket.oidc.bucket}"
+  bucket_name     = "oidc-provider"
+  issuer_hostpath = "s3.${data.aws_region.current.name}.amazonaws.com/${local.bucket_name}"
 }
 
 data "aws_region" "current" {}
 
 resource "aws_s3_bucket" "oidc" {
-  bucket = "oidc-provider"
+  bucket = local.bucket_name
 
   tags = var.tags
 }
 
+resource "aws_s3_bucket_ownership_controls" "oidc" {
+  bucket = aws_s3_bucket.oidc.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "oidc" {
+  bucket = aws_s3_bucket.oidc.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_acl" "oidc" {
+  bucket = aws_s3_bucket.oidc.id
+  acl    = "public-read"
+
+  depends_on = [
+    aws_s3_bucket_ownership_controls.oidc,
+    aws_s3_bucket_public_access_block.oidc,
+  ]
+}
+
 resource "aws_s3_object" "discovery" {
-  bucket = aws_s3_bucket.oidc.bucket
-  key    = ".well-known/openid-configuration/discovery.json"
-  source = <<-EOF
+  bucket  = aws_s3_bucket.oidc.bucket
+  key     = ".well-known/openid-configuration"
+  content = <<-EOF
     {
       "issuer": "https://${local.issuer_hostpath}",
       "jwks_uri": "https://${local.issuer_hostpath}/keys.json",
@@ -33,7 +60,7 @@ resource "aws_s3_object" "discovery" {
       ]
     }
   EOF
-  acl    = "public-read"
+  acl     = "public-read"
 }
 
 resource "null_resource" "keys" {
@@ -43,20 +70,22 @@ resource "null_resource" "keys" {
 
   # generate keys.json file
   provisioner "local-exec" {
-    command = file("${path.module}/keys_gen.sh")
+    command = "go run main.go -key ../cluster-bootstrap/sa-signer.key.pub | jq '.keys += [.keys[0]] | .keys[1].kid = \"\"' > keys.json"
   }
 }
 
-resource "aws_s3_object" "discovery" {
+resource "aws_s3_object" "keys" {
   bucket = aws_s3_bucket.oidc.bucket
-  key    = ".well-known/openid-configuration/discovery.json"
+  key    = "keys.json"
   source = "keys.json"
   acl    = "public-read"
+
+  depends_on = [null_resource.keys]
 }
 
-# Grab EKS pod identity mutating webhook yaml files and deploy
-data "http" "auth" {
-  url = "https://github.com/aws/amazon-eks-pod-identity-webhook/blob/master/deploy/auth.yaml"
+# Install cert-manager, a pre-requisite 
+data "http" "cert_manager" {
+  url = "https://github.com/cert-manager/cert-manager/releases/download/${var.cert_manager_version}/cert-manager.yaml"
 
   depends_on = [
     aws_s3_bucket.oidc,
@@ -64,8 +93,25 @@ data "http" "auth" {
   ]
 }
 
-data "http" "deployment_base" {
-  url = "https://github.com/aws/amazon-eks-pod-identity-webhook/blob/master/deploy/deployment-base.yaml"
+# Grab EKS pod identity mutating webhook yaml files and deploy
+data "http" "auth" {
+  url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/auth.yaml"
+
+  depends_on = [
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
+}
+
+resource "null_resource" "deployment" {
+  triggers = {
+    image = var.amazon_eks_pod_identity_webhook_image
+  }
+
+  # get deployment-base.yaml and substite image placeholder with value
+  provisioner "local-exec" {
+    command = "curl https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/deployment-base.yaml | sed -e \"s|IMAGE|${var.amazon_eks_pod_identity_webhook_image}|g\" | sed -e \"s|sts.amazonaws.com|${var.audiences}|g\" | tee deployment.yaml"
+  }
 
   depends_on = [
     aws_s3_bucket.oidc,
@@ -74,7 +120,7 @@ data "http" "deployment_base" {
 }
 
 data "http" "mutatingwebhook" {
-  url = "https://github.com/aws/amazon-eks-pod-identity-webhook/blob/master/deploy/mutatingwebhook.yaml"
+  url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/mutatingwebhook.yaml"
 
   depends_on = [
     aws_s3_bucket.oidc,
@@ -83,7 +129,7 @@ data "http" "mutatingwebhook" {
 }
 
 data "http" "service" {
-  url = "https://github.com/aws/amazon-eks-pod-identity-webhook/blob/master/deploy/service.yaml"
+  url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/service.yaml"
 
   depends_on = [
     aws_s3_bucket.oidc,
@@ -91,20 +137,57 @@ data "http" "service" {
   ]
 }
 
-resource "kubectl_manifest" "auth" {
-  yaml_body = data.http.auth.body
+data "kubectl_file_documents" "cert_manager" {
+  content = data.http.cert_manager.response_body
 }
 
-resource "kubectl_manifest" "deployment_base" {
-  yaml_body = data.http.deployment_base.body
+resource "kubectl_manifest" "cert_manager" {
+  for_each  = toset(data.kubectl_file_documents.cert_manager.documents)
+  yaml_body = each.value
+}
+
+data "kubectl_file_documents" "auth" {
+  content = data.http.auth.response_body
+
+  depends_on = [kubectl_manifest.cert_manager]
+}
+
+resource "kubectl_manifest" "auth" {
+  for_each  = toset(data.kubectl_file_documents.auth.documents)
+  yaml_body = each.value
+}
+
+data "kubectl_file_documents" "deployment" {
+  content = file("deployment.yaml")
+
+  depends_on = [kubectl_manifest.cert_manager]
+}
+
+resource "kubectl_manifest" "deployment" {
+  for_each  = toset(data.kubectl_file_documents.deployment.documents)
+  yaml_body = each.value
+}
+
+data "kubectl_file_documents" "mutatingwebhook" {
+  content = data.http.mutatingwebhook.response_body
+
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 resource "kubectl_manifest" "mutatingwebhook" {
-  yaml_body = data.http.mutatingwebhook.body
+  for_each  = toset(data.kubectl_file_documents.mutatingwebhook.documents)
+  yaml_body = each.value
+}
+
+data "kubectl_file_documents" "service" {
+  content = data.http.service.response_body
+
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 resource "kubectl_manifest" "service" {
-  yaml_body = data.http.service.body
+  for_each  = toset(data.kubectl_file_documents.service.documents)
+  yaml_body = each.value
 }
 
 output "oidc_issuer" {

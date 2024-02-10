@@ -5,3 +5,9 @@ variable "tags" {
     Project = "cka-practice"
   }
 }
+
+variable "audiences" {
+  description = "Audiences to use for IRSA"
+  type        = string
+  default     = "irsa"
+}

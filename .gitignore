@@ -3,4 +3,7 @@
 **/*.tfplan
 **/node_join.sh
 **/kubeconfig
+**/kubeadm_config.yaml
 **/sa-signer.key.pub
+**/deployment.yaml
+**/keys.json
