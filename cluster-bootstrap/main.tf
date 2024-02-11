@@ -18,7 +18,7 @@ resource "aws_subnet" "public_subnets" {
   availability_zone = each.key
   cidr_block        = each.value
   vpc_id            = aws_vpc.vpc.id
-  tags              = tomap(merge({ Name = "Public-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/elb" = "1", "kubernetes.io/cluster/${var.cluster_name}" = "shared" }, var.tags))
+  tags              = tomap(merge({ Name = "Public-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/elb" = "1", "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, var.tags))
 }
 
 resource "aws_subnet" "private_subnets" {
@@ -26,7 +26,7 @@ resource "aws_subnet" "private_subnets" {
   availability_zone = each.key
   cidr_block        = each.value
   vpc_id            = aws_vpc.vpc.id
-  tags              = tomap(merge({ Name = "Private-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/internal-elb" = "1" }, { "kubernetes.io/cluster/${var.cluster_name}" = "shared" }, { "karpenter.sh/discovery" = "${var.cluster_name}" }, var.tags))
+  tags              = tomap(merge({ Name = "Private-subnet-${each.key}-${var.env}-env" }, { "kubernetes.io/role/internal-elb" = "1" }, { "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, { "karpenter.sh/discovery" = "${var.cluster_name}" }, var.tags))
 }
 
 # Export subnets IDs as array to reference it going forward
@@ -280,7 +280,7 @@ resource "aws_instance" "control_plane" {
   subnet_id                   = random_shuffle.control_plane_public_subnets.result[0]
   user_data                   = file("userdata.sh")
   vpc_security_group_ids      = [aws_security_group.ssh.id, aws_security_group.control_plane.id]
-  tags                        = tomap(merge({ Name = "control-plane-${var.env}" }, var.tags))
+  tags                        = tomap(merge({ Name = "control-plane-${var.env}", "kubernetes.io/cluster/${var.cluster_name}" = "owned", "node-role.kubernetes.io/master" = "" }, var.tags))
 }
 
 # Generate config for kubeadm, so API server will be reachable from my IP and add config for IRSA
@@ -330,7 +330,7 @@ resource "null_resource" "control_plane_init" {
 
   # grab kubeadm join command for nodes and kubeconfig for k8s provider
   provisioner "local-exec" {
-    command = "ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" > ${path.module}/node_join.sh"
+    command = "echo \"export KUBELET_EXTRA_ARGS='--cloud-provider=external'\" > ${path.module}/node_join.sh && ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" >> ${path.module}/node_join.sh"
   }
 }
 
@@ -349,7 +349,7 @@ resource "aws_instance" "node" {
   subnet_id                   = random_shuffle.node_public_subnets[count.index].result[0]
   user_data                   = file("userdata.sh")
   vpc_security_group_ids      = [aws_security_group.ssh.id, aws_security_group.node.id]
-  tags                        = tomap(merge({ Name = "node-${var.env}-${count.index}" }, var.tags))
+  tags                        = tomap(merge({ Name = "node-${var.env}-${count.index}", "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, var.tags))
 }
 
 resource "null_resource" "node_join" {

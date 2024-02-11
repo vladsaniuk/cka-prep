@@ -86,21 +86,11 @@ resource "aws_s3_object" "keys" {
 # Install cert-manager, a pre-requisite 
 data "http" "cert_manager" {
   url = "https://github.com/cert-manager/cert-manager/releases/download/${var.cert_manager_version}/cert-manager.yaml"
-
-  depends_on = [
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
 }
 
 # Grab EKS pod identity mutating webhook yaml files and deploy
 data "http" "auth" {
   url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/auth.yaml"
-
-  depends_on = [
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
 }
 
 resource "null_resource" "deployment" {
@@ -112,29 +102,14 @@ resource "null_resource" "deployment" {
   provisioner "local-exec" {
     command = "curl https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/deployment-base.yaml | sed -e \"s|IMAGE|${var.amazon_eks_pod_identity_webhook_image}|g\" | sed -e \"s|sts.amazonaws.com|${var.audiences}|g\" | tee deployment.yaml"
   }
-
-  depends_on = [
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
 }
 
 data "http" "mutatingwebhook" {
   url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/mutatingwebhook.yaml"
-
-  depends_on = [
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
 }
 
 data "http" "service" {
   url = "https://raw.githubusercontent.com/aws/amazon-eks-pod-identity-webhook/master/deploy/service.yaml"
-
-  depends_on = [
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
 }
 
 data "kubectl_file_documents" "cert_manager" {
@@ -142,52 +117,91 @@ data "kubectl_file_documents" "cert_manager" {
 }
 
 resource "kubectl_manifest" "cert_manager" {
-  for_each  = toset(data.kubectl_file_documents.cert_manager.documents)
+  for_each  = data.kubectl_file_documents.cert_manager.manifests
   yaml_body = each.value
+
+  depends_on = [
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
 }
 
 data "kubectl_file_documents" "auth" {
   content = data.http.auth.response_body
-
-  depends_on = [kubectl_manifest.cert_manager]
 }
 
 resource "kubectl_manifest" "auth" {
-  for_each  = toset(data.kubectl_file_documents.auth.documents)
+  for_each  = data.kubectl_file_documents.auth.manifests
   yaml_body = each.value
+
+  depends_on = [
+    kubectl_manifest.cert_manager,
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
+}
+
+data "local_file" "deployment" {
+  filename = "${path.module}/deployment.yaml"
+
+  depends_on = [null_resource.deployment]
 }
 
 data "kubectl_file_documents" "deployment" {
-  content = file("deployment.yaml")
-
-  depends_on = [kubectl_manifest.cert_manager]
+  content = data.local_file.deployment.content
 }
 
 resource "kubectl_manifest" "deployment" {
-  for_each  = toset(data.kubectl_file_documents.deployment.documents)
+  for_each  = data.kubectl_file_documents.deployment.manifests
   yaml_body = each.value
+
+  depends_on = [
+    kubectl_manifest.cert_manager,
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
 }
 
 data "kubectl_file_documents" "mutatingwebhook" {
   content = data.http.mutatingwebhook.response_body
-
-  depends_on = [kubectl_manifest.cert_manager]
 }
 
 resource "kubectl_manifest" "mutatingwebhook" {
-  for_each  = toset(data.kubectl_file_documents.mutatingwebhook.documents)
+  for_each  = data.kubectl_file_documents.mutatingwebhook.manifests
   yaml_body = each.value
+
+  depends_on = [
+    kubectl_manifest.cert_manager,
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
 }
 
 data "kubectl_file_documents" "service" {
   content = data.http.service.response_body
-
-  depends_on = [kubectl_manifest.cert_manager]
 }
 
 resource "kubectl_manifest" "service" {
-  for_each  = toset(data.kubectl_file_documents.service.documents)
+  for_each  = data.kubectl_file_documents.service.manifests
   yaml_body = each.value
+
+  depends_on = [
+    kubectl_manifest.cert_manager,
+    aws_s3_bucket.oidc,
+    aws_s3_object.discovery
+  ]
+}
+
+# Create OIDC IdP with AWS IAM
+data "tls_certificate" "oidc" {
+  url = "https://${local.issuer_hostpath}"
+}
+
+resource "aws_iam_openid_connect_provider" "oidc" {
+  client_id_list  = ["irsa"]
+  thumbprint_list = [data.tls_certificate.oidc.certificates[0].sha1_fingerprint]
+  url             = data.tls_certificate.oidc.url
+  tags            = tomap(merge({ Name = "OIDC-provider" }, var.tags))
 }
 
 output "oidc_issuer" {

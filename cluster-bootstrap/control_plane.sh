@@ -1,9 +1,11 @@
 #!/bin/bash
 
-kubectl cluster-info
+export KUBELET_EXTRA_ARGS='--cloud-provider=external'
+kubectl cluster-info 1 > /dev/null
 cluster_init_status=$?
 if [[ $cluster_init_status == 1 ]]
 then
+    echo "Cluster is not initialized, run setup with kubeadm"
     set -e
     # init control plane
     sudo kubeadm init --config /tmp/kubeadm_config.yaml

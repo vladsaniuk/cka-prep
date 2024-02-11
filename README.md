@@ -37,3 +37,25 @@ terraform apply "plan-destroy.tfplan"
 
 ## Cluster with AWS IRSA for self-hosted cluster and AWS Load Balancer Controller       
 You need to have installed go: https://go.dev/doc/install 
+
+Spin-up a cluster in the same manner.
+
+Deploy self-managed OIDC provider:
+```
+cd oidc-provider
+terraform init -upgrade
+terraform plan -target='data.kubectl_file_documents.deployment' -out=plan.tfplan # this is required to pull and template yaml provided by dev team
+terraform apply "plan.tfplan"
+terraform plan -out=plan.tfplan
+terraform apply "plan.tfplan"
+```
+
+Deploy AWS Load Balancer Controller:
+```
+cd aws-lb-controller
+terraform init -upgrade
+terraform plan -out=plan.tfplan
+terraform apply "plan.tfplan"
+```
+
+Deploy Nginx mock to test AWS LBC are able to create LB and it's accessible: `KUBECONFIG=cluster-bootstrap/kubeconfig kubectl apply -f nginx-aws-lbc.yaml`

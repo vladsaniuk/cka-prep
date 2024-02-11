@@ -30,6 +30,69 @@ data "terraform_remote_state" "cluster" {
   }
 }
 
+# Deploy AWS Cloud Provider
+
+data "http" "role_binding" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/2ca3fc6e5e74e856411e25ae0f26d4c299e2eb3d/examples/existing-cluster/base/apiserver-authentication-reader-role-binding.yaml"
+}
+
+resource "kubectl_manifest" "role_binding" {
+  yaml_body = data.http.role_binding.response_body
+}
+
+data "http" "daemon_set" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/2ca3fc6e5e74e856411e25ae0f26d4c299e2eb3d/examples/existing-cluster/base/aws-cloud-controller-manager-daemonset.yaml"
+}
+
+resource "kubectl_manifest" "daemon_set" {
+  yaml_body = data.http.daemon_set.response_body
+}
+
+data "http" "cluster_role_binding" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/2ca3fc6e5e74e856411e25ae0f26d4c299e2eb3d/examples/existing-cluster/base/cluster-role-binding.yaml"
+}
+
+resource "kubectl_manifest" "cluster_role_binding" {
+  yaml_body = data.http.cluster_role_binding.response_body
+}
+
+data "http" "cluster_role" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/2ca3fc6e5e74e856411e25ae0f26d4c299e2eb3d/examples/existing-cluster/base/cluster-role.yaml"
+}
+
+resource "kubectl_manifest" "cluster_role" {
+  yaml_body = data.http.cluster_role.response_body
+}
+
+data "http" "service_account" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/2ca3fc6e5e74e856411e25ae0f26d4c299e2eb3d/examples/existing-cluster/base/service-account.yaml"
+}
+
+resource "kubectl_manifest" "service_account" {
+  yaml_body = data.http.service_account.response_body
+}
+
+data "kubernetes_service_account_v1" "aws_cloud_controller" {
+  metadata {
+    name      = "cloud-controller-manager"
+    namespace = "kube-system"
+  }
+
+  depends_on = [kubectl_manifest.service_account]
+}
+
+resource "kubernetes_annotations" "aws_cloud_controller" {
+  api_version = "v1"
+  kind        = "ServiceAccount"
+  metadata {
+    name      = data.kubernetes_service_account_v1.aws_cloud_controller.metadata[0].name
+    namespace = data.kubernetes_service_account_v1.aws_cloud_controller.metadata[0].namespace
+  }
+  annotations = {
+    "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller_role.arn
+  }
+}
+
 # Create AWS LBC role for IRSA
 resource "aws_iam_role" "aws_load_balancer_controller_role" {
   assume_role_policy = jsonencode({
