@@ -1,6 +1,5 @@
 #!/bin/bash
 
-export KUBELET_EXTRA_ARGS='--cloud-provider=external'
 kubectl cluster-info 1 > /dev/null
 cluster_init_status=$?
 if [[ $cluster_init_status == 1 ]]

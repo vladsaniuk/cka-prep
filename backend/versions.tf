@@ -1,7 +1,7 @@
 terraform {
   backend "s3" {
     bucket         = "project-tfstate-bucket-dev"
-    key            = "cka/nginx-ingress-conroller/terraform.tfstate"
+    key            = "backend/terraform.tfstate"
     encrypt        = true
     dynamodb_table = "state_lock"
     region         = "us-east-1"
@@ -13,14 +13,6 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = ">= 5.31.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = ">= 2.24.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = ">= 2.12.1"
     }
   }
 }

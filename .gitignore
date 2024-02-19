@@ -7,3 +7,4 @@
 **/sa-signer.key.pub
 **/deployment.yaml
 **/keys.json
+**/*.tfstate*

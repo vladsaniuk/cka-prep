@@ -39,7 +39,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-  - host: public-load-balancer-972987177.us-east-1.elb.amazonaws.com
+  - host: public-load-balancer-972987177.us-east-1.elb.amazonaws.com # here goes your public LB host
     http:
       paths:
       - pathType: Exact

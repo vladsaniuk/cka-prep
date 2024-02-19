@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket         = "vlad-sanyuk-tfstate-bucket-dev"
+    bucket         = "project-tfstate-bucket-dev"
     key            = "cka/nginx-ingress-conroller/terraform.tfstate"
     encrypt        = true
     dynamodb_table = "state_lock"

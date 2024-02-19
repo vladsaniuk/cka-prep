@@ -264,12 +264,120 @@ resource "aws_security_group" "node" {
   lifecycle {
     create_before_destroy = true
   }
+
+  tags = tomap(merge({ Name = "node-sg-${var.env}", "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, var.tags))
 }
 
 # shuffle subnets to place EC2 in
 resource "random_shuffle" "control_plane_public_subnets" {
   input        = local.public_subnets_ids
   result_count = 1
+}
+
+# Configure IAM permissions for AWS Cloud Provider (Cloud Controller Manager) for control plane
+data "aws_iam_policy_document" "ec2_trust" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "control_plane" {
+  assume_role_policy = data.aws_iam_policy_document.ec2_trust.json
+  description        = "AWS Cloud Provider (Cloud Controller Manager) role for ${var.cluster_name} cluster control plane"
+  name               = "AWS-CCM-${var.cluster_name}-control-plane"
+  path               = "/"
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "control_plane" {
+  statement {
+    sid       = ""
+    effect    = "Allow"
+    resources = ["*"]
+
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeInstances",
+      "ec2:DescribeRegions",
+      "ec2:DescribeRouteTables",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeVolumes",
+      "ec2:DescribeAvailabilityZones",
+      "ec2:CreateSecurityGroup",
+      "ec2:CreateTags",
+      "ec2:CreateVolume",
+      "ec2:ModifyInstanceAttribute",
+      "ec2:ModifyVolume",
+      "ec2:AttachVolume",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:CreateRoute",
+      "ec2:DeleteRoute",
+      "ec2:DeleteSecurityGroup",
+      "ec2:DeleteVolume",
+      "ec2:DetachVolume",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:DescribeVpcs",
+      "elasticloadbalancing:AddTags",
+      "elasticloadbalancing:AttachLoadBalancerToSubnets",
+      "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
+      "elasticloadbalancing:CreateLoadBalancer",
+      "elasticloadbalancing:CreateLoadBalancerPolicy",
+      "elasticloadbalancing:CreateLoadBalancerListeners",
+      "elasticloadbalancing:ConfigureHealthCheck",
+      "elasticloadbalancing:DeleteLoadBalancer",
+      "elasticloadbalancing:DeleteLoadBalancerListeners",
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeLoadBalancerAttributes",
+      "elasticloadbalancing:DetachLoadBalancerFromSubnets",
+      "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+      "elasticloadbalancing:ModifyLoadBalancerAttributes",
+      "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+      "elasticloadbalancing:SetLoadBalancerPoliciesForBackendServer",
+      "elasticloadbalancing:AddTags",
+      "elasticloadbalancing:CreateListener",
+      "elasticloadbalancing:CreateTargetGroup",
+      "elasticloadbalancing:DeleteListener",
+      "elasticloadbalancing:DeleteTargetGroup",
+      "elasticloadbalancing:DescribeListeners",
+      "elasticloadbalancing:DescribeLoadBalancerPolicies",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeTargetHealth",
+      "elasticloadbalancing:ModifyListener",
+      "elasticloadbalancing:ModifyTargetGroup",
+      "elasticloadbalancing:RegisterTargets",
+      "elasticloadbalancing:DeregisterTargets",
+      "elasticloadbalancing:SetLoadBalancerPoliciesOfListener",
+      "iam:CreateServiceLinkedRole",
+      "kms:DescribeKey"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "control_plane" {
+  policy      = data.aws_iam_policy_document.control_plane.json
+  description = "AWS Cloud Provider (Cloud Controller Manager) policy for ${var.cluster_name} cluster control plane"
+  name        = "AWS-CCM-policy-${var.cluster_name}-control-plane"
+  path        = "/"
+  tags        = var.tags
+}
+
+resource "aws_iam_policy_attachment" "control_plane" {
+  name       = "ccm-policy-to-role-attachment"
+  roles      = [aws_iam_role.control_plane.name]
+  policy_arn = aws_iam_policy.control_plane.arn
+}
+
+resource "aws_iam_instance_profile" "control_plane" {
+  name = "control_plane_profile"
+  role = aws_iam_role.control_plane.name
 }
 
 resource "aws_instance" "control_plane" {
@@ -280,10 +388,12 @@ resource "aws_instance" "control_plane" {
   subnet_id                   = random_shuffle.control_plane_public_subnets.result[0]
   user_data                   = file("userdata.sh")
   vpc_security_group_ids      = [aws_security_group.ssh.id, aws_security_group.control_plane.id]
-  tags                        = tomap(merge({ Name = "control-plane-${var.env}", "kubernetes.io/cluster/${var.cluster_name}" = "owned", "node-role.kubernetes.io/master" = "" }, var.tags))
+  iam_instance_profile        = aws_iam_instance_profile.control_plane.name
+  tags                        = tomap(merge({ Name = "control-plane-${var.env}", "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, var.tags))
 }
 
 # Generate config for kubeadm, so API server will be reachable from my IP and add config for IRSA
+# set cloud-provider to external on api-server and controller-manager
 resource "local_file" "kubeadm_config" {
   filename        = "${path.module}/kubeadm_config.yaml"
   file_permission = "0755"
@@ -291,6 +401,7 @@ resource "local_file" "kubeadm_config" {
   content = <<-EOF
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
+clusterName: ${var.cluster_name}
 apiServer:
   certSANs:
   - ${aws_instance.control_plane.public_ip}
@@ -298,6 +409,10 @@ apiServer:
   extraArgs:
     api-audiences: ${var.audiences}
     service-account-issuer: https://${local.issuer_hostpath}
+    cloud-provider: external
+controllerManager:
+  extraArgs:
+    cloud-provider: external
   EOF
 }
 
@@ -330,7 +445,7 @@ resource "null_resource" "control_plane_init" {
 
   # grab kubeadm join command for nodes and kubeconfig for k8s provider
   provisioner "local-exec" {
-    command = "echo \"export KUBELET_EXTRA_ARGS='--cloud-provider=external'\" > ${path.module}/node_join.sh && ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" >> ${path.module}/node_join.sh"
+    command = "ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" > ${path.module}/node_join.sh"
   }
 }
 
@@ -338,6 +453,54 @@ resource "random_shuffle" "node_public_subnets" {
   count        = var.nodes_count
   input        = local.public_subnets_ids
   result_count = 1
+}
+
+# Configure IAM permissions for AWS Cloud Provider (Cloud Controller Manager) for node
+resource "aws_iam_role" "node" {
+  assume_role_policy = data.aws_iam_policy_document.ec2_trust.json
+  description        = "AWS Cloud Provider (Cloud Controller Manager) role for ${var.cluster_name} cluster node"
+  name               = "AWS-CCM-${var.cluster_name}-node"
+  path               = "/"
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "node" {
+  statement {
+    sid       = ""
+    effect    = "Allow"
+    resources = ["*"]
+
+    actions = [
+      "ec2:DescribeInstances",
+      "ec2:DescribeRegions",
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:GetRepositoryPolicy",
+      "ecr:DescribeRepositories",
+      "ecr:ListImages",
+      "ecr:BatchGetImage"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "node" {
+  policy      = data.aws_iam_policy_document.node.json
+  description = "AWS Cloud Provider (Cloud Controller Manager) policy for ${var.cluster_name} for node"
+  name        = "AWS-CCM-policy-${var.cluster_name}-node"
+  path        = "/"
+  tags        = var.tags
+}
+
+resource "aws_iam_policy_attachment" "node" {
+  name       = "ccm-policy-to-role-attachment"
+  roles      = [aws_iam_role.node.name]
+  policy_arn = aws_iam_policy.node.arn
+}
+
+resource "aws_iam_instance_profile" "node" {
+  name = "node_profile"
+  role = aws_iam_role.node.name
 }
 
 resource "aws_instance" "node" {
@@ -349,6 +512,7 @@ resource "aws_instance" "node" {
   subnet_id                   = random_shuffle.node_public_subnets[count.index].result[0]
   user_data                   = file("userdata.sh")
   vpc_security_group_ids      = [aws_security_group.ssh.id, aws_security_group.node.id]
+  iam_instance_profile        = aws_iam_instance_profile.node.name
   tags                        = tomap(merge({ Name = "node-${var.env}-${count.index}", "kubernetes.io/cluster/${var.cluster_name}" = "owned" }, var.tags))
 }
 
@@ -402,7 +566,7 @@ resource "null_resource" "get_kubeconfig" {
   provisioner "local-exec" {
     command = <<-EOF
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/admin.conf" > ${path.module}/kubeconfig
-      KUBECONFIG=kubeconfig kubectl config set clusters.kubernetes.server https://${aws_instance.control_plane.public_ip}:6443
+      KUBECONFIG=kubeconfig kubectl config set clusters.${var.cluster_name}.server https://${aws_instance.control_plane.public_ip}:6443
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/sa.pub" > ${path.module}/sa-signer.key.pub
       chmod 400 sa-signer.key.pub
     EOF

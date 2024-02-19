@@ -38,3 +38,9 @@ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.
 apt-get update
 apt-get install -y kubelet kubeadm kubectl
 apt-mark hold kubelet kubeadm kubectl
+
+# set hostname to DNS record - AWS Cloud Provider (Cloud Controller Manager) pre-requisite 
+hostnamectl set-hostname "$(curl -s http://169.254.169.254/latest/meta-data/local-hostname)"
+
+# set extra arg for Kubelet, this is to push it to pick up external cloud provider, required for AWS Cloud Provider
+echo "KUBELET_EXTRA_ARGS=--cloud-provider external" | tee /etc/default/kubelet

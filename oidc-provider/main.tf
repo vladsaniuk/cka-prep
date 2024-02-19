@@ -5,6 +5,47 @@ locals {
 
 data "aws_region" "current" {}
 
+# Deploy AWS Cloud Provider
+data "http" "aws_ccm_role_binding" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/examples/existing-cluster/base/apiserver-authentication-reader-role-binding.yaml"
+}
+
+resource "kubectl_manifest" "aws_ccm_role_binding" {
+  yaml_body = data.http.aws_ccm_role_binding.response_body
+}
+
+data "http" "aws_ccm_daemon_set" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/examples/existing-cluster/base/aws-cloud-controller-manager-daemonset.yaml"
+}
+
+resource "kubectl_manifest" "aws_ccm_daemon_set" {
+  yaml_body = data.http.aws_ccm_daemon_set.response_body
+}
+
+data "http" "aws_ccm_cluster_role_binding" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/examples/existing-cluster/base/cluster-role-binding.yaml"
+}
+
+resource "kubectl_manifest" "aws_ccm_cluster_role_binding" {
+  yaml_body = data.http.aws_ccm_cluster_role_binding.response_body
+}
+
+data "http" "aws_ccm_cluster_role" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/examples/existing-cluster/base/cluster-role.yaml"
+}
+
+resource "kubectl_manifest" "aws_ccm_cluster_role" {
+  yaml_body = data.http.aws_ccm_cluster_role.response_body
+}
+
+data "http" "aws_ccm_service_account" {
+  url = "https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/examples/existing-cluster/base/service-account.yaml"
+}
+
+resource "kubectl_manifest" "aws_ccm_service_account" {
+  yaml_body = data.http.aws_ccm_service_account.response_body
+}
+
 resource "aws_s3_bucket" "oidc" {
   bucket = local.bucket_name
 
@@ -81,6 +122,10 @@ resource "aws_s3_object" "keys" {
   acl    = "public-read"
 
   depends_on = [null_resource.keys]
+
+  lifecycle {
+    replace_triggered_by = [null_resource.keys]
+  }
 }
 
 # Install cert-manager, a pre-requisite 
@@ -122,7 +167,12 @@ resource "kubectl_manifest" "cert_manager" {
 
   depends_on = [
     aws_s3_bucket.oidc,
-    aws_s3_object.discovery
+    aws_s3_object.discovery,
+    kubectl_manifest.aws_ccm_cluster_role,
+    kubectl_manifest.aws_ccm_cluster_role_binding,
+    kubectl_manifest.aws_ccm_daemon_set,
+    kubectl_manifest.aws_ccm_role_binding,
+    kubectl_manifest.aws_ccm_service_account
   ]
 }
 
@@ -134,11 +184,7 @@ resource "kubectl_manifest" "auth" {
   for_each  = data.kubectl_file_documents.auth.manifests
   yaml_body = each.value
 
-  depends_on = [
-    kubectl_manifest.cert_manager,
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 data "local_file" "deployment" {
@@ -155,11 +201,7 @@ resource "kubectl_manifest" "deployment" {
   for_each  = data.kubectl_file_documents.deployment.manifests
   yaml_body = each.value
 
-  depends_on = [
-    kubectl_manifest.cert_manager,
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 data "kubectl_file_documents" "mutatingwebhook" {
@@ -170,11 +212,7 @@ resource "kubectl_manifest" "mutatingwebhook" {
   for_each  = data.kubectl_file_documents.mutatingwebhook.manifests
   yaml_body = each.value
 
-  depends_on = [
-    kubectl_manifest.cert_manager,
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 data "kubectl_file_documents" "service" {
@@ -185,11 +223,7 @@ resource "kubectl_manifest" "service" {
   for_each  = data.kubectl_file_documents.service.manifests
   yaml_body = each.value
 
-  depends_on = [
-    kubectl_manifest.cert_manager,
-    aws_s3_bucket.oidc,
-    aws_s3_object.discovery
-  ]
+  depends_on = [kubectl_manifest.cert_manager]
 }
 
 # Create OIDC IdP with AWS IAM

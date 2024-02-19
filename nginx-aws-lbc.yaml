@@ -11,9 +11,7 @@ spec:
     metadata:
       labels:
         app: nginx
-    
     spec:
-      serviceAccountName: nginx-sa
       containers:
       - name: nginx
         image: nginx:latest
@@ -43,7 +41,7 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - host: 
+  - host:
     http:
       paths:
       - pathType: Exact
