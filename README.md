@@ -88,3 +88,29 @@ cd ../cluster-bootstrap
 terraform plan -destroy -var 'my_ip=185.189.245.112/32' -var 'nodes_count=1' -out=plan-destroy.tfplan
 terraform apply "plan-destroy.tfplan"
 ```
+
+## Access management      
+You can add users and services in access-management/main.tf, you will find kubeconfig in access-management/${users|services}/kubeconfig    
+For services, namespace should already exist in cluster.         
+```
+cd access-management
+terraform init -upgrade
+terraform plan -out=plan.tfplan
+terraform apply "plan.tfplan"
+```
+Verify access works as expected
+```
+# service, kube-system request will fail, default namespace will work
+KUBECONFIG=access-management/services/application/kubeconfig kubectl get all -n kube-system
+KUBECONFIG=access-management/services/application/kubeconfig kubectl get all
+
+# dev role, kube-system request will fail, default namespace will work
+KUBECONFIG=access-management/users/jack/kubeconfig kubectl get all -n kube-system
+KUBECONFIG=access-management/users/jack/kubeconfig kubectl get all
+
+# admin role, both will work
+KUBECONFIG=access-management/users/john/kubeconfig kubectl get all -n kube-system
+KUBECONFIG=access-management/users/john/kubeconfig kubectl get all
+```
+
+Clean-up in the same manner, as Nginx, AWS LBC and OIDC.       

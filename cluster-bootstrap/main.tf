@@ -569,6 +569,7 @@ resource "null_resource" "get_kubeconfig" {
       KUBECONFIG=kubeconfig kubectl config set clusters.${var.cluster_name}.server https://${aws_instance.control_plane.public_ip}:6443
       ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/sa.pub" > ${path.module}/sa-signer.key.pub
       chmod 400 sa-signer.key.pub
+      ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} "sudo cat /etc/kubernetes/pki/ca.crt" > ${path.module}/ca.crt
     EOF
   }
 
@@ -577,7 +578,7 @@ resource "null_resource" "get_kubeconfig" {
   ]
 }
 
-output "control_plane_ips" {
+output "control_plane_ip" {
   value = aws_instance.control_plane.public_ip
 }
 

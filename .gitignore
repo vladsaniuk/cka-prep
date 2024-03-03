@@ -5,6 +5,9 @@
 **/kubeconfig
 **/kubeadm_config.yaml
 **/sa-signer.key.pub
+**/ca.crt
 **/deployment.yaml
 **/keys.json
 **/*.tfstate*
+**/services
+**/users
