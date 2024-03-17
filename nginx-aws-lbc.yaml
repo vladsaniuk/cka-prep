@@ -17,6 +17,57 @@ spec:
         image: nginx:latest
         ports:
         - containerPort: 80
+    # tolerate control-plan taint to be scheduled on this type of nodes
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      affinity:
+        nodeAffinity:
+          # make sure pod scheduled on t3.small instances, as we know this is instance type control-plane scheduled on
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: instance-type
+                operator: In
+                values:
+                - t3.small
+          # soft rule to prefer us-east-1 region
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - us-east-1
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: component
+                operator: In
+                values:
+                - etcd
+            topologyKey: kubernetes.io/hostname
+            # affinity is namespaced, so we need to use namespace selector for cross-namespace affinity to work
+            namespaceSelector:
+              matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                - kube-system
+        podAntiAffinity:
+          # soft rule to try to avoid being scheduled twice on the same node
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - nginx
+              topologyKey: kubernetes.io/hostname
 ---
 apiVersion: v1
 kind: Service

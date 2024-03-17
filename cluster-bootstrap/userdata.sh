@@ -42,5 +42,8 @@ apt-mark hold kubelet kubeadm kubectl
 # set hostname to DNS record - AWS Cloud Provider (Cloud Controller Manager) pre-requisite 
 hostnamectl set-hostname "$(curl -s http://169.254.169.254/latest/meta-data/local-hostname)"
 
+# grab instance type
+instanceType=$(curl -s http://169.254.169.254/latest/meta-data/instance-type)
+
 # set extra arg for Kubelet, this is to push it to pick up external cloud provider, required for AWS Cloud Provider
-echo "KUBELET_EXTRA_ARGS=--cloud-provider external" | tee /etc/default/kubelet
+echo "KUBELET_EXTRA_ARGS=--cloud-provider external --node-labels=instance-type=$instanceType" | tee /etc/default/kubelet

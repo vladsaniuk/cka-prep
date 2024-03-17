@@ -199,3 +199,12 @@ kong@kong-deployment-75bb5bb58d-zdpnc:/$ ls -ln /tmp/
 total 4
 -rw-r--r-- 1 1000 1000 13 Mar  9 16:40 test.txt
 ```
+
+## Scheduling
+
+nginx-aws-lbc.yaml has configured toleration to be scheduled on control plane node, hard affinity rule to be scheduled on the same node as etcd and soft anti-affinity rule for pods to be scheduled on different nodes. You can run it with:
+```
+KUBECONFIG=cluster-bootstrap/kubeconfig kubectl apply -f nginx-aws-lbc.yaml
+KUBECONFIG=cluster-bootstrap/kubeconfig kubectl get all
+```
+Kong OSS has configured soft pod affinity rules to be scheduled on the same node, as PostgreSQL pod, and 1 pod per node

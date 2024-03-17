@@ -94,10 +94,43 @@ spec:
         volumeMounts:
           - mountPath: /tmp
             name: shared-tmp-storage
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - postgres
+              topologyKey: kubernetes.io/hostname
+        podAntiAffinity:
+          # soft rule to try to avoid being scheduled twice on the same node
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - kong
+              topologyKey: kubernetes.io/hostname
       initContainers:
       - name: is-db-available
         image: busybox:latest
-        command: ["sh", "-c", "for try in $(seq 0 360); do echo \"Check DB availability, try #$try\"; nslookup postgres-service.load-balancer-controller.svc.cluster.local; if [ $? -eq 0 ]; then exit 0; fi; sleep 1; done"]
+        command: ["sh", "-c"]
+        args:
+        - for try in $(seq 0 360); do 
+              echo "Check DB availability, try \#$try";
+              nslookup postgres-service.load-balancer-controller.svc.cluster.local;
+                  if [ $? -eq 0 ]; then 
+                      exit 0;
+                  fi;
+              sleep 1;
+          done
       - name: kong-migrations-bootstrap
         image: vladsanyuk/kong:3.4.1.1-1710001318-69
         command: ["kong", "migrations", "bootstrap"]
@@ -122,8 +155,17 @@ spec:
             value: bundled,easter_egg
       - name: kong-migrations-up
         image: vladsanyuk/kong:3.4.1.1-1710001318-69
-        command: ["sh", "-c", "sleep 10 && kong migrations up && kong migrations finish"]
+        command: ["sh", "-c"]
+        args:
+        - sleep 10;
+          if [ "$RUN_MIGRATIONS" = "true" ]; then 
+              echo "Running migrations";
+              kong migrations up && kong migrations finish; else
+              echo "RUN_MIGRATIONS is false";
+          fi
         env:
+          - name: RUN_MIGRATIONS
+            value: "true"
           - name: KONG_DATABASE
             value: postgres
           - name: KONG_PG_HOST
@@ -143,8 +185,8 @@ spec:
           - name: KONG_PLUGINS
             value: bundled,easter_egg
       volumes:
-        - name: shared-tmp-storage
-          emptyDir: {}
+      - name: shared-tmp-storage
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
