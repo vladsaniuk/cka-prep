@@ -6,7 +6,7 @@ spec:
   selector:
     matchLabels:
       app: kong
-  replicas: 1
+  replicas: 2
   template:
     metadata:
       labels:
@@ -33,6 +33,10 @@ spec:
           name: admin-ui-http
         - containerPort: 8445
           name: admin-ui-https
+        - containerPort: 8100
+          name: status-api-http
+        - containerPort: 8446
+          name: status-api-https
         env:
           - name: KONG_DATABASE
             value: postgres
@@ -184,6 +188,23 @@ spec:
             value: info
           - name: KONG_PLUGINS
             value: bundled,easter_egg
+      startupProbe:
+        httpGet:
+          path: /status/ready
+          port: status-api-https
+        failureThreshold: 30
+        periodSeconds: 10
+      readinessProbe:
+        tcpSocket:
+          port: proxy-https
+        initialDelaySeconds: 30
+        periodSeconds: 60
+      livenessProbe:
+        httpGet:
+          path: /status/ready
+          port: status-api-https
+        initialDelaySeconds: 30
+        periodSeconds: 60
       volumes:
       - name: shared-tmp-storage
         emptyDir: {}

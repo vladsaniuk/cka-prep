@@ -208,3 +208,7 @@ KUBECONFIG=cluster-bootstrap/kubeconfig kubectl apply -f nginx-aws-lbc.yaml
 KUBECONFIG=cluster-bootstrap/kubeconfig kubectl get all
 ```
 Kong OSS has configured soft pod affinity rules to be scheduled on the same node, as PostgreSQL pod, and 1 pod per node
+
+## Probes
+Kong OSS has configured startup, readiness and liveness probes.              
+Startup and liveness probes are http GET requests to Status API server, while readiness probe is TCP check on proxy https port, which is main one.
