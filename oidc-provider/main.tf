@@ -1,6 +1,11 @@
 locals {
-  bucket_name     = "oidc-provider"
+  bucket_name     = "oidc-provider-${var.env}-${random_string.bucket_suffix.result}"
   issuer_hostpath = "s3.${data.aws_region.current.name}.amazonaws.com/${local.bucket_name}"
+}
+
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  special = false
 }
 
 data "aws_region" "current" {}

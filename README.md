@@ -212,3 +212,7 @@ Kong OSS has configured soft pod affinity rules to be scheduled on the same node
 ## Probes
 Kong OSS has configured startup, readiness and liveness probes.              
 Startup and liveness probes are http GET requests to Status API server, while readiness probe is TCP check on proxy https port, which is main one.
+
+## etcd backup & restore                
+Control plane node runs a script on a crontab at 2 PM every day to backup etcd snapshot to versioned S3 bucket, you can also run it manually by SSH into VM and running `bash /opt/bash /opt/etcd-backup/etcd_backup.sh`
+To restore etcd you need to SSH into control plane and run `bash /opt/etcd-backup/etcd_restore.sh`

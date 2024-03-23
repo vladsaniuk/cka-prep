@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# abort on nonzero exitstatus, unbound variable, don't hide errors within pipes, print each statement after applying all forms of substitution
+set -xeuo pipefail
 
 # disable swap
 swapoff -a
@@ -34,7 +37,7 @@ systemctl status containerd --no-pager
 apt-get install -y apt-transport-https ca-certificates curl gpg
 mkdir -m 755 /etc/apt/keyrings
 curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.25/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+printf 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /\n' | tee /etc/apt/sources.list.d/kubernetes.list
 apt-get update
 apt-get install -y kubelet kubeadm kubectl
 apt-mark hold kubelet kubeadm kubectl
@@ -46,4 +49,4 @@ hostnamectl set-hostname "$(curl -s http://169.254.169.254/latest/meta-data/loca
 instanceType=$(curl -s http://169.254.169.254/latest/meta-data/instance-type)
 
 # set extra arg for Kubelet, this is to push it to pick up external cloud provider, required for AWS Cloud Provider
-echo "KUBELET_EXTRA_ARGS=--cloud-provider external --node-labels=instance-type=$instanceType" | tee /etc/default/kubelet
+printf "KUBELET_EXTRA_ARGS=--cloud-provider external --node-labels=instance-type=%s\n" "${instanceType}" | tee /etc/default/kubelet

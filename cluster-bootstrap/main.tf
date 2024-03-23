@@ -375,8 +375,97 @@ resource "aws_iam_policy_attachment" "control_plane" {
   policy_arn = aws_iam_policy.control_plane.arn
 }
 
+# S3 bucket for etcd backups
+resource "aws_s3_bucket" "etcd_backup" {
+  bucket        = "etcd-backup-${var.env}-${random_string.bucket_suffix.result}"
+  force_destroy = true
+
+  tags = var.tags
+}
+
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+resource "aws_s3_bucket_versioning" "etcd_backup_versioning" {
+  bucket = aws_s3_bucket.etcd_backup.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "etcd_backup_ownership" {
+  bucket = aws_s3_bucket.etcd_backup.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "etcd_backup_public_access_block" {
+  bucket = aws_s3_bucket.etcd_backup.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "etcd_backup_encryption" {
+  bucket = aws_s3_bucket.etcd_backup.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = "aws/s3"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+data "aws_iam_policy_document" "etcd_backup" {
+  statement {
+    sid    = ""
+    effect = "Allow"
+    resources = [
+      aws_s3_bucket.etcd_backup.arn,
+      "${aws_s3_bucket.etcd_backup.arn}/*"
+    ]
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject"
+    ]
+  }
+
+  statement {
+    sid       = ""
+    effect    = "Allow"
+    resources = ["*"] # this is required for ListAllMyBuckets, but we only limit it to this specific call
+
+    actions = [
+      "s3:ListAllMyBuckets"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "etcd_backup" {
+  policy      = data.aws_iam_policy_document.etcd_backup.json
+  description = "etcd backup policy for ${var.cluster_name} cluster control plane"
+  name        = "etcd-backup-policy-${var.cluster_name}-control-plane"
+  path        = "/"
+  tags        = var.tags
+}
+
+resource "aws_iam_policy_attachment" "etcd_backup" {
+  name       = "etcd-backup-policy-to-role-attachment"
+  roles      = [aws_iam_role.control_plane.name]
+  policy_arn = aws_iam_policy.etcd_backup.arn
+}
+
 resource "aws_iam_instance_profile" "control_plane" {
-  name = "control_plane_profile"
+  name = "control-plane-profile"
   role = aws_iam_role.control_plane.name
 }
 
@@ -434,6 +523,18 @@ resource "null_resource" "control_plane_init" {
     host        = aws_instance.control_plane.public_ip
   }
 
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /opt/etcd-backup",
+      "sudo chown ubuntu:ubuntu /opt/etcd-backup"
+    ]
+  }
+
+  provisioner "file" {
+    source      = "${path.module}/etcd-backup"
+    destination = "/opt"
+  }
+
   provisioner "file" {
     source      = "${path.module}/kubeadm_config.yaml"
     destination = "/tmp/kubeadm_config.yaml"
@@ -447,6 +548,8 @@ resource "null_resource" "control_plane_init" {
   provisioner "local-exec" {
     command = "ssh -o StrictHostKeyChecking=no ubuntu@${aws_instance.control_plane.public_ip} \"kubeadm token create --print-join-command\" > ${path.module}/node_join.sh"
   }
+
+  depends_on = [aws_s3_bucket.etcd_backup]
 }
 
 resource "random_shuffle" "node_public_subnets" {
@@ -576,28 +679,4 @@ resource "null_resource" "get_kubeconfig" {
   depends_on = [
     null_resource.control_plane_init
   ]
-}
-
-output "control_plane_ip" {
-  value = aws_instance.control_plane.public_ip
-}
-
-output "node_ips" {
-  value = aws_instance.node[*].public_ip
-}
-
-output "cluster_name" {
-  value = var.cluster_name
-}
-
-output "vpc_id" {
-  value = aws_vpc.vpc.id
-}
-
-output "public_subnets_ids" {
-  value = local.public_subnets_ids
-}
-
-output "worker_nodes_ids" {
-  value = aws_instance.node[*].id
 }

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# abort on nonzero exitstatus, unbound variable, don't hide errors within pipes, print each statement after applying all forms of substitution
+set -xeuo pipefail
+
 random() {
     lenght=$1
 
@@ -9,7 +12,7 @@ random() {
         array[$RANDOM]=$i
     done
     
-    printf %s "${array[@]::$lenght}" $'\n'
+    printf %s "${array[@]::${lenght}}" $'\n'
 }
 
 namespace=$3
@@ -17,6 +20,9 @@ if [[ -z $namespace ]]
 then
     namespace="default"
 fi
+
+printf "We setup secrets here and we we'll not print them\n"
+set +x
 
 kubectl create secret generic postgres-secrets \
     --from-literal=username="kong-$(random 5)" \

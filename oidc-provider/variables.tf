@@ -23,3 +23,9 @@ variable "audiences" {
   type        = string
   default     = "irsa"
 }
+
+variable "env" {
+  description = "Development environment"
+  type        = string
+  default     = "dev"
+}
